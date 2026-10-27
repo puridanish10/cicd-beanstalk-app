@@ -1,0 +1,35 @@
+name: Deploy to Elastic Beanstalk
+on:
+  push:
+    branches: [main]
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: us-east-1
+      - name: Package application
+        run: zip -r app.zip application.py requirements.txt
+      - name: Upload version to S3
+        run: |
+          BUCKET=$(aws elasticbeanstalk create-storage-location --query S3Bucket --output text)
+          echo "BUCKET=$BUCKET" >> $GITHUB_ENV
+          aws s3 cp app.zip s3://$BUCKET/cicd-eb-app/app-${{ github.sha }}.zip
+      - name: Create application version
+        run: |
+          aws elasticbeanstalk create-application-version \
+            --application-name cicd-eb-app \
+            --version-label ${{ github.sha }} \
+            --source-bundle S3Bucket=$BUCKET,S3Key=cicd-eb-app/app-${{ github.sha }}.zip
+      - name: Deploy to environment
+        run: |
+          aws elasticbeanstalk update-environment \
+            --environment-name cicd-eb-staging \
+            --version-label ${{ github.sha }}
+      - name: Wait for environment
+        run: aws elasticbeanstalk wait environment-updated --environment-names cicd-eb-staging
